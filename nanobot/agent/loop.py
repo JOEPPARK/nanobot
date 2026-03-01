@@ -219,6 +219,10 @@ class AgentLoop:
         # Determine active model & tier for this loop
         current_tier = complexity_tier
         if self.smart_routing.enabled and current_tier is not None:
+            # Downgrade opus to sonnet when opus is disabled
+            if current_tier == ComplexityTier.OPUS and not self.smart_routing.opus_enabled:
+                logger.info("Smart routing: opus disabled, downgrading to sonnet")
+                current_tier = ComplexityTier.SONNET
             active_model = self._get_model_for_tier(current_tier)
             logger.info("Smart routing: tier={}, model={}", current_tier.value, active_model)
         else:

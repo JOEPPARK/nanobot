@@ -229,6 +229,7 @@ class SmartRoutingConfig(Base):
     haiku_model: str = "anthropic/claude-haiku-4-5"
     sonnet_model: str = "anthropic/claude-sonnet-4-5"
     opus_model: str = "anthropic/claude-opus-4-5"
+    opus_enabled: bool = True  # When False, opus-tier messages are downgraded to sonnet
     show_model_indicator: bool = True  # Append (h)/(s)/(o) to responses
     auto_fallback: bool = True  # Fall back to lower model on error
 
