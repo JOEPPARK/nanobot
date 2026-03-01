@@ -17,6 +17,7 @@ from nanobot.agent.classifier import (
     MODEL_INDICATORS,
     ComplexityTier,
     classify_message,
+    format_token_usage,
 )
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
@@ -214,6 +215,8 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         # Determine active model & tier for this loop
         current_tier = complexity_tier
@@ -239,6 +242,10 @@ class AgentLoop:
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )
+
+            # Accumulate token usage
+            total_input_tokens += response.usage.get("prompt_tokens", 0)
+            total_output_tokens += response.usage.get("completion_tokens", 0)
 
             if response.has_tool_calls:
                 if on_progress:
@@ -316,15 +323,17 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        # Append model indicator suffix
-        if (
-            self.smart_routing.enabled
-            and self.smart_routing.show_model_indicator
-            and current_tier is not None
-            and final_content
-        ):
-            indicator = MODEL_INDICATORS.get(current_tier, "")
-            final_content = f"{final_content}\n\n{indicator}"
+        # Append model indicator and token usage suffix
+        if self.smart_routing.enabled and final_content:
+            suffix_parts: list[str] = []
+            if self.smart_routing.show_model_indicator and current_tier is not None:
+                indicator = MODEL_INDICATORS.get(current_tier, "")
+                if indicator:
+                    suffix_parts.append(indicator)
+            if self.smart_routing.show_token_usage and (total_input_tokens or total_output_tokens):
+                suffix_parts.append(format_token_usage(total_input_tokens, total_output_tokens, active_model))
+            if suffix_parts:
+                final_content = f"{final_content}\n\n{'\n'.join(suffix_parts)}"
 
         return final_content, tools_used, messages
 

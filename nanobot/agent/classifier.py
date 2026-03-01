@@ -69,3 +69,35 @@ FALLBACK_ORDER: dict[ComplexityTier, ComplexityTier | None] = {
     ComplexityTier.SONNET: ComplexityTier.DEFAULT,
     ComplexityTier.DEFAULT: None,
 }
+
+# Model pricing per 1M tokens (input, output) in USD
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "haiku": (1.0, 5.0),
+    "sonnet": (3.0, 15.0),
+    "opus": (15.0, 75.0),
+}
+
+
+def _detect_pricing_key(model: str) -> str | None:
+    """Detect pricing key from model name (e.g. 'anthropic/claude-sonnet-4-5' -> 'sonnet')."""
+    model_lower = model.lower()
+    for key in MODEL_PRICING:
+        if key in model_lower:
+            return key
+    return None
+
+
+def format_token_usage(
+    input_tokens: int, output_tokens: int, model: str,
+) -> str:
+    """Format token usage line with optional cost estimate.
+
+    Returns e.g. '📊 in: 2,521 / out: 1,843 / $0.05'
+    """
+    parts = [f"📊 in: {input_tokens:,} / out: {output_tokens:,}"]
+    pricing_key = _detect_pricing_key(model)
+    if pricing_key:
+        inp_price, out_price = MODEL_PRICING[pricing_key]
+        cost = (input_tokens * inp_price + output_tokens * out_price) / 1_000_000
+        parts.append(f"${cost:.2f}")
+    return " / ".join(parts)

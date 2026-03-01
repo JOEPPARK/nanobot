@@ -229,6 +229,7 @@ class SmartRoutingConfig(Base):
     opus_model: str = "anthropic/claude-opus-4-5"
     opus_enabled: bool = True  # When False, opus-tier messages are downgraded to sonnet
     show_model_indicator: bool = True  # Append (s)/(o) to responses
+    show_token_usage: bool = False  # Append token usage and cost to responses
     auto_fallback: bool = True  # Fall back to lower model on error
 
 
