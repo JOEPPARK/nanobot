@@ -126,7 +126,6 @@ class AgentLoop:
         """Get the model name for a given complexity tier."""
         sr = self.smart_routing
         tier_models = {
-            ComplexityTier.HAIKU: sr.haiku_model,
             ComplexityTier.SONNET: sr.sonnet_model,
             ComplexityTier.OPUS: sr.opus_model,
         }
@@ -218,7 +217,7 @@ class AgentLoop:
 
         # Determine active model & tier for this loop
         current_tier = complexity_tier
-        if self.smart_routing.enabled and current_tier is not None:
+        if self.smart_routing.enabled and current_tier is not None and current_tier != ComplexityTier.DEFAULT:
             # Downgrade opus to sonnet when opus is disabled
             if current_tier == ComplexityTier.OPUS and not self.smart_routing.opus_enabled:
                 logger.info("Smart routing: opus disabled, downgrading to sonnet")

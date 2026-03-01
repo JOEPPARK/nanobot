@@ -217,20 +217,18 @@ class ChannelsConfig(Base):
 
 
 class SmartRoutingConfig(Base):
-    """Smart model routing configuration.
+    """Smart model routing based on trailing question marks.
 
-    Routes messages to different models based on complexity:
-    - haiku: simple queries, greetings, general search
-    - sonnet: complex coding, stock analysis, legal questions
-    - opus: large-scale data analysis, critical decisions
+    - ??? → opus model
+    - ??  → sonnet model
+    - otherwise → default model (agents.defaults.model)
     """
 
     enabled: bool = True
-    haiku_model: str = "anthropic/claude-haiku-4-5"
     sonnet_model: str = "anthropic/claude-sonnet-4-5"
     opus_model: str = "anthropic/claude-opus-4-5"
     opus_enabled: bool = True  # When False, opus-tier messages are downgraded to sonnet
-    show_model_indicator: bool = True  # Append (h)/(s)/(o) to responses
+    show_model_indicator: bool = True  # Append (s)/(o) to responses
     auto_fallback: bool = True  # Fall back to lower model on error
 
 
