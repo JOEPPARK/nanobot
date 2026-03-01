@@ -12,6 +12,12 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.classifier import (
+    FALLBACK_ORDER,
+    MODEL_INDICATORS,
+    ComplexityTier,
+    classify_message,
+)
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
@@ -64,8 +70,9 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        smart_routing: dict | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, SmartRoutingConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -80,6 +87,12 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+
+        # Smart routing configuration
+        if smart_routing is not None:
+            self.smart_routing = SmartRoutingConfig(**smart_routing) if isinstance(smart_routing, dict) else smart_routing
+        else:
+            self.smart_routing = SmartRoutingConfig()
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -108,6 +121,16 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
+
+    def _get_model_for_tier(self, tier: ComplexityTier) -> str:
+        """Get the model name for a given complexity tier."""
+        sr = self.smart_routing
+        tier_models = {
+            ComplexityTier.HAIKU: sr.haiku_model,
+            ComplexityTier.SONNET: sr.sonnet_model,
+            ComplexityTier.OPUS: sr.opus_model,
+        }
+        return tier_models.get(tier, self.model)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -178,12 +201,29 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        complexity_tier: ComplexityTier | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
+        """Run the agent iteration loop. Returns (final_content, tools_used, messages).
+
+        When smart routing is enabled and a complexity_tier is provided,
+        the loop uses the corresponding model and appends an indicator
+        suffix ((h)/(s)/(o)) to the final response.  If the selected
+        model returns an error and auto_fallback is on, the loop retries
+        with the next lower-tier model automatically.
+        """
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+
+        # Determine active model & tier for this loop
+        current_tier = complexity_tier
+        if self.smart_routing.enabled and current_tier is not None:
+            active_model = self._get_model_for_tier(current_tier)
+            logger.info("Smart routing: tier={}, model={}", current_tier.value, active_model)
+        else:
+            active_model = self.model
+            current_tier = None
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -191,7 +231,7 @@ class AgentLoop:
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=active_model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
@@ -234,7 +274,29 @@ class AgentLoop:
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
+                    logger.error("LLM returned error (model={}): {}", active_model, (clean or "")[:200])
+
+                    # Auto-fallback to a lower-tier model
+                    if (
+                        self.smart_routing.enabled
+                        and self.smart_routing.auto_fallback
+                        and current_tier is not None
+                    ):
+                        fallback_tier = FALLBACK_ORDER.get(current_tier)
+                        if fallback_tier is not None:
+                            fallback_model = self._get_model_for_tier(fallback_tier)
+                            logger.warning(
+                                "Falling back from {} ({}) to {} ({})",
+                                current_tier.value, active_model,
+                                fallback_tier.value, fallback_model,
+                            )
+                            current_tier = fallback_tier
+                            active_model = fallback_model
+                            # Reset messages to initial state for clean retry
+                            messages = initial_messages
+                            iteration = 0
+                            continue
+
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(
@@ -250,6 +312,16 @@ class AgentLoop:
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
             )
+
+        # Append model indicator suffix
+        if (
+            self.smart_routing.enabled
+            and self.smart_routing.show_model_indicator
+            and current_tier is not None
+            and final_content
+        ):
+            indicator = MODEL_INDICATORS.get(current_tier, "")
+            final_content = f"{final_content}\n\n{indicator}"
 
         return final_content, tools_used, messages
 
@@ -429,8 +501,12 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        # Classify message complexity for smart model routing
+        tier = classify_message(msg.content) if self.smart_routing.enabled else None
+
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            complexity_tier=tier,
         )
 
         if final_content is None:

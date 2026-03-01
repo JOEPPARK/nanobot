@@ -216,6 +216,23 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class SmartRoutingConfig(Base):
+    """Smart model routing configuration.
+
+    Routes messages to different models based on complexity:
+    - haiku: simple queries, greetings, general search
+    - sonnet: complex coding, stock analysis, legal questions
+    - opus: large-scale data analysis, critical decisions
+    """
+
+    enabled: bool = True
+    haiku_model: str = "anthropic/claude-haiku-4-5"
+    sonnet_model: str = "anthropic/claude-sonnet-4-5"
+    opus_model: str = "anthropic/claude-opus-4-5"
+    show_model_indicator: bool = True  # Append (h)/(s)/(o) to responses
+    auto_fallback: bool = True  # Fall back to lower model on error
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -227,6 +244,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    smart_routing: SmartRoutingConfig = Field(default_factory=SmartRoutingConfig)
 
 
 class AgentsConfig(Base):
